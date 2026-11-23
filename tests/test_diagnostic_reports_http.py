@@ -26,7 +26,7 @@ def wait_for_stopped_sender(transport):
 
 @pytest.fixture
 def receiver(monkeypatch):
-    from core import analytics
+    from core import diagnostic_reports
     state=SimpleNamespace(requests=[],status=201,changed=threading.Condition())
     def wait_for_requests(count):
         with state.changed:
@@ -43,7 +43,7 @@ def receiver(monkeypatch):
     server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
     thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
     destination={'site':'localtest123','host':f'http://127.0.0.1:{server.server_port}','appUrl':'https://app.test.invalid'}
-    monkeypatch.setattr(analytics,'_destination',lambda:destination)
+    monkeypatch.setattr(diagnostic_reports,'_diagnostic_destination',lambda:destination)
     yield state
     server.shutdown();server.server_close();thread.join(2)
 
