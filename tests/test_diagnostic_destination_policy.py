@@ -1,4 +1,4 @@
-"""Diagnostic consent never authorizes plaintext non-loopback collection URLs."""
+"""Fork builds keep diagnostics local even with configured collectors."""
 import importlib
 import json
 
@@ -34,12 +34,13 @@ def destination_reporter(monkeypatch, tmp_path):
 @pytest.mark.parametrize('host', ['collector.example', '192.168.1.2', '127.0.0.2', 'localhost.', 'localtest.me', '[::ffff:127.0.0.1]'])
 def test_diagnostics_refuses_plaintext_except_exact_loopback_literals(destination_reporter, monkeypatch, field, host):
     reporter, transports = destination_reporter
-    from core import analytics
+    from core.analytics_transport import valid_url
     destination = {'site': 'fixture123', 'host': 'https://collector.example', 'appUrl': 'https://app.example'}
     destination[field] = f'http://{host}'
-    monkeypatch.setattr(analytics, '_destination', lambda: destination)
-    # The analytics URL contract deliberately remains unchanged.
-    assert analytics.valid_url(destination[field], origin=field == 'host')
+    assert valid_url(destination[field], origin=field == 'host')
+    monkeypatch.setenv('SUPERMETRY_SITE_ID', destination['site'])
+    monkeypatch.setenv('SUPERMETRY_HOST', destination['host'])
+    monkeypatch.setenv('SUPERMETRY_APP_URL', destination['appUrl'])
     assert reporter.status()['available'] is False
     reporter.consent(True)
     reporter.capture('generation_failed')
@@ -53,15 +54,15 @@ def test_diagnostics_refuses_plaintext_except_exact_loopback_literals(destinatio
     ('http://127.0.0.1:3456', 'http://[::1]:3000'),
     ('http://[::1]:3456', 'http://localhost:3000'),
 ])
-def test_https_and_literal_loopback_development_destinations_work(destination_reporter, monkeypatch, host, app_url):
+def test_even_valid_legacy_destinations_cannot_activate_delivery(destination_reporter, monkeypatch, host, app_url):
     reporter, transports = destination_reporter
-    from core import analytics
-    destination = {'site': 'fixture123', 'host': host, 'appUrl': app_url}
-    monkeypatch.setattr(analytics, '_destination', lambda: destination)
-    assert reporter.status()['available'] is True
+    monkeypatch.setenv('SUPERMETRY_SITE_ID', 'fixture123')
+    monkeypatch.setenv('SUPERMETRY_HOST', host)
+    monkeypatch.setenv('SUPERMETRY_APP_URL', app_url)
+    assert reporter.status()['available'] is False
     reporter.consent(True)
     reporter._tick()
-    assert transports == [destination]
+    assert transports == []
 
 
 def test_managed_desktop_inbox_never_resolves_a_python_destination(destination_reporter, monkeypatch, tmp_path):
