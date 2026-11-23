@@ -54,7 +54,7 @@ def test_packaged_intake_metadata_is_readable_without_widening_build_source(tmp_
         monkeypatch.setenv(key, value)
     intake = prepare_resources.runpy.run_path(str(ROOT / "scripts/generate_supermetry_config.py"))
     source = tmp_path / "source/supermetry-app.generated.json"
-    intake["write_config"](source, env)
+    intake["write_config"](source)
     assert source.stat().st_mode & 0o777 == 0o600
     output = tmp_path / "VoiceStudio.app"
     packaged = output / "Catalogs/supermetry-app.generated.json"

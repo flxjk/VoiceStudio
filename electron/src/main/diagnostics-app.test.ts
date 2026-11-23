@@ -7,7 +7,6 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DiagnosticReports, type DiagnosticsOptions } from './diagnostics';
 import { diagnosticAppDestination, diagnosticAppFields } from './diagnostics-app';
-import analyticsConfig from '../../../config/analytics.json';
 import { TTL_MS, type DiagnosticProps } from './diagnostics-schema';
 
 const storageGate = vi.hoisted(() => ({
@@ -104,6 +103,24 @@ function reporter(options: Partial<DiagnosticsOptions> = {}) {
 }
 const accepted = (count: number) =>
   new Response(JSON.stringify({ accepted: count, dropped: [] }), { status: 202 });
+
+it('ignores configured collectors and saved consent when delivery is disabled', async () => {
+  const fetchSpy = vi.fn(async () => accepted(1));
+  vi.stubGlobal('fetch', fetchSpy);
+  const priorLaunch = reporter({ send: fetchSpy });
+  await priorLaunch.initialize();
+  expect((await priorLaunch.setConsent(true)).enabled).toBe(true);
+  await priorLaunch.close();
+
+  fetchSpy.mockClear();
+  const shipped = reporter({ deliveryDisabled: true });
+  await shipped.initialize();
+  expect(shipped.status()).toMatchObject({ available: false, enabled: false });
+  expect((await shipped.setConsent(true)).enabled).toBe(false);
+  shipped.capture({ category: 'generation_failed', stage: 'generation' });
+  await shipped.flush();
+  expect(fetchSpy).not.toHaveBeenCalled();
+});
 
 it('selects app intake when an explicit valid app configuration exists', async () => {
   const send = vi.fn(async (_url: unknown, _init?: RequestInit) => accepted(1));
@@ -477,9 +494,7 @@ it('resolves app config per field with strict env precedence and safe host fallb
     host: env.SUPERMETRY_APP_HOST,
     sessionPings: true,
   });
-  expect(
-    diagnosticAppDestination({ ...env, SUPERMETRY_APP_HOST: 'http://127.1' }, generated)?.host,
-  ).toBe(analyticsConfig.host);
+  expect(diagnosticAppDestination({ ...env, SUPERMETRY_APP_HOST: 'http://127.1' }, generated)).toBeNull();
   expect(diagnosticAppDestination({ ...env, SUPERMETRY_APP_ID: 'INVALID' }, generated)).toBeNull();
   expect(diagnosticAppDestination({ ...env, SUPERMETRY_INGEST_KEY: '' }, generated)).toBeNull();
   for (const host of ['http://localhost:4567', 'http://127.0.0.1:4567', 'http://[::1]:4567'])
@@ -798,9 +813,7 @@ it('preserves environment and explicit-option precedence over packaged metadata'
     host: env.SUPERMETRY_APP_HOST,
   });
   expect(diagnosticAppDestination({ SUPERMETRY_APP_ID: 'invalid!' })).toBeNull();
-  expect(diagnosticAppDestination({ SUPERMETRY_APP_HOST: 'http://public.invalid' })?.host).toBe(
-    analyticsConfig.host,
-  );
+  expect(diagnosticAppDestination({ SUPERMETRY_APP_HOST: 'http://public.invalid' })).toBeNull();
   const send = vi.fn(
     async (_url: unknown, _init?: RequestInit) => new Response('', { status: 202 }),
   );

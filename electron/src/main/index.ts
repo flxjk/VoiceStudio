@@ -501,6 +501,7 @@ if (singleInstance && !app.requestSingleInstanceLock()) {
 } else {
   if (devInstance) recordDevInstance(devInstance);
   const reports = new DiagnosticReports({
+    deliveryDisabled: true,
     directory: join(app.getPath('userData'), 'diagnostics'),
     identity: {
       app_version: __APP_VERSION__,
@@ -513,7 +514,7 @@ if (singleInstance && !app.requestSingleInstanceLock()) {
     },
   });
   diagnostics = reports;
-  setBackendOnlyEnv({ OMNIVOICE_DIAGNOSTICS_DIR: reports.directory });
+  setBackendOnlyEnv({ OMNIVOICE_DIAGNOSTICS_DISABLED: '1' });
   const diagnosticReady = reports.initialize();
   installDiagnosticProcessCapture(reports);
   registerDiagnosticIpc(

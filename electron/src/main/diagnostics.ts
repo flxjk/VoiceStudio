@@ -44,6 +44,7 @@ export interface DiagnosticsOptions {
   /** Local fixed outcomes only; never server text, credentials or event payloads. */
   onDeliveryResult?: (result: { reason: string; count: number }) => void;
   send?: typeof fetch;
+  deliveryDisabled?: boolean;
   now?: () => number;
   /** Disable the periodic worker in deterministic tests; flush() runs the same worker. */
   automatic?: boolean;
@@ -229,12 +230,19 @@ export class DiagnosticReports {
   private readonly sessionPath: string;
 
   constructor(private readonly options: DiagnosticsOptions) {
-    this.env = options.env ?? process.env;
-    this.destination =
-      options.destination === undefined ? diagnosticDestination(this.env) : options.destination;
-    this.appDestination = diagnosticAppDestination(this.env, options.appConfig);
+    this.env = options.deliveryDisabled
+      ? { OMNIVOICE_DIAGNOSTICS_DISABLED: '1' }
+      : (options.env ?? process.env);
+    this.destination = options.deliveryDisabled
+      ? null
+      : (options.destination === undefined ? diagnosticDestination(this.env) : options.destination);
+    this.appDestination = options.deliveryDisabled
+      ? null
+      : diagnosticAppDestination(this.env, options.appConfig);
     this.now = options.now ?? Date.now;
-    this.send = options.send ?? fetch;
+    this.send = options.deliveryDisabled
+      ? () => Promise.reject(new Error('Diagnostic delivery is disabled'))
+      : (options.send ?? fetch);
     this.outbox = join(options.directory, 'outbox.json');
     this.inbox = join(options.directory, 'inbox');
     this.consentPath = join(options.directory, 'consent.json');

@@ -39,9 +39,6 @@ import VoiceStudioKit
         guard !started, !disabled else { return }; started = true
         defer { initialCheckCompleted = true }
         if environmentKilled { await revokeForHardKill(); return }
-        if reporter == nil, let configuration = await Task.detached(priority: .utility, operation: { Self.configuredReporter() }).value {
-            reporter = configuration.reporter; stallThresholdMs = configuration.stallMs
-        }
         guard let reporter else { ready = true; prompted = true; return }
         observeStatus(reporter)
         await reporter.load(); refresh(); observationRevision += 1; updateSubscription()
@@ -185,34 +182,7 @@ import VoiceStudioKit
     nonisolated private static func ownedDirectory() -> URL? {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("Diagnostics", isDirectory: true)
     }
-    nonisolated private static func configuredReporter() -> (reporter: DiagnosticReports, stallMs: Int64)? {
-        do {
-            let bundle = Bundle.main
-            guard let policyURL = bundle.url(forResource: "diagnostics", withExtension: "json", subdirectory: "Catalogs"),
-                  let destinationURL = bundle.url(forResource: "diagnostics-destination", withExtension: "json", subdirectory: "Catalogs"),
-                  let version = AppVersion.full(info: bundle.infoDictionary),
-                  let directory = ownedDirectory(),
-                  let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: destinationURL)) as? [String: String],
-                  let site = raw["site"], let host = raw["host"], let appURL = raw["appUrl"] else { return nil }
-            #if arch(arm64)
-            let arch = "arm64"
-            #elseif arch(x86_64)
-            let arch = "x64"
-            #else
-            let arch = "unknown"
-            #endif
-            let policyData = try Data(contentsOf: policyURL)
-            let policyObject = try JSONSerialization.jsonObject(with: policyData) as? [String: Any]
-            let limits = policyObject?["limits"] as? [String: Int]
-            let stallMs = Int64(max(600_000, limits?["stall_ms"] ?? 600_000))
-            let configuredSite = getenv("SUPERMETRY_SITE_ID").map { String(cString: $0) } ?? site
-            let configuredHost = getenv("SUPERMETRY_HOST").map { String(cString: $0) } ?? host
-            let configuredApp = getenv("SUPERMETRY_APP_URL").map { String(cString: $0) } ?? appURL
-            let appConfig = DiagnosticAppConfiguration.resolve(generated: bundle.url(forResource: "supermetry-app.generated", withExtension: "json", subdirectory: "Catalogs").flatMap { try? Data(contentsOf: $0) }, environment: ProcessInfo.processInfo.environment, fallbackHost: host)
-            let reporter = try DiagnosticReports(directory: directory, policy: DiagnosticPolicy(data: policyData), destination: DiagnosticDestination(site: configuredSite, host: configuredHost, appUrl: configuredApp, app: appConfig), appVersion: version, arch: arch)
-            return (reporter, stallMs)
-        } catch { return nil } // Corrupt/missing policy is unavailable, never implicit consent.
-    }
+
 }
 
 /// MetricKit objects never cross into a Task or the durable queue. Only closed

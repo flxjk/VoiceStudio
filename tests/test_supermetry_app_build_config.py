@@ -1,11 +1,10 @@
-"""Build metadata is private, credential-free by default, and runtime-independent."""
+"""Verify that every packaging path ignores external reporting configuration."""
 from __future__ import annotations
 
 import importlib.util
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 
@@ -21,48 +20,33 @@ def node_config(env):
     node = shutil.which("node")
     if not node:
         pytest.skip("Node is required for Electron build configuration")
-    result = subprocess.run([node, "--input-type=module", "-e", "import {generatedSupermetryConfig} from './config/supermetry-app.mjs';process.stdout.write(JSON.stringify(generatedSupermetryConfig(JSON.parse(process.env.INTAKE_TEST_ENV))));"],
-        cwd=ROOT, env={**os.environ, "INTAKE_TEST_ENV": json.dumps(env)}, capture_output=True, text=True, check=True)
+    result = subprocess.run([node, "--input-type=module", "-e", "import {generatedSupermetryConfig} from './config/supermetry-app.mjs';process.stdout.write(JSON.stringify(generatedSupermetryConfig()));"],
+        cwd=ROOT, env={**os.environ, **env}, capture_output=True, text=True, check=True)
     assert not result.stderr
     return json.loads(result.stdout)
 
 
-@pytest.mark.parametrize("host,accepted", [
-    ("https://app.supermetry.com", True), ("https://collector.example:8443/", True),
-    ("http://localhost:7777", True), ("http://127.0.0.1:7777", True), ("http://[::1]:7777", True),
-    ("http://127.1", False), ("http://2130706433", False), ("http://localhost.", False),
-    ("http://collector.example", False), ("https://collector.example/path", False),
-    ("https://key@collector.example", False), ("https://collector.example?key=value", False),
-    ("https://collector.example#secret", False), ("https://collector.example:invalid", False),
-    ("", False),
-])
-def test_python_and_electron_build_metadata_agree_on_transport_policy(host, accepted):
-    env = {"SUPERMETRY_APP_ID": "fixtureapp123", "SUPERMETRY_INGEST_KEY": "smk_" + "a" * 39, "SUPERMETRY_APP_HOST": host}
-    python = build.generated_config(env)
-    assert python == node_config(env)
-    assert ("host" in python) is accepted
-    assert python["diagnostics"]["sessionPings"] is False
-
-
-@pytest.mark.parametrize("env", [{}, {"SUPERMETRY_APP_ID": "short"}, {"SUPERMETRY_INGEST_KEY": "smk_" + "0" * 39}, {"SUPERMETRY_APP_ID": "UPPERCASE", "SUPERMETRY_INGEST_KEY": "wrong"}])
-def test_missing_or_invalid_credentials_are_absent_without_error(env):
-    assert build.generated_config(env) == node_config(env) == {"diagnostics": {"sessionPings": False}}
-
-
-def test_build_flag_is_explicit_and_defaults_off():
-    for value in ("", "0", "true", "yes", "1"):
-        env = {"SUPERMETRY_DIAGNOSTICS_SESSION_PINGS": value}
-        assert build.generated_config(env) == node_config(env) == {"diagnostics": {"sessionPings": value == "1"}}
+@pytest.mark.parametrize("host", ["https://collector.example", "http://127.0.0.1:7777", ""])
+def test_build_metadata_ignores_external_intake_environment(host, monkeypatch):
+    env = {
+        "SUPERMETRY_APP_ID": "fixtureapp123",
+        "SUPERMETRY_INGEST_KEY": "smk_" + "a" * 39,
+        "SUPERMETRY_APP_HOST": host,
+        "SUPERMETRY_DIAGNOSTICS_SESSION_PINGS": "1",
+    }
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    assert build.generated_config() == node_config(env) == {"diagnostics": {"sessionPings": False}}
 
 
 def test_cli_never_prints_key_and_credential_free_rebuild_erases_old_metadata(tmp_path):
     output = tmp_path / "supermetry-app.generated.json"
     env = {key: value for key, value in os.environ.items() if not key.startswith("SUPERMETRY_")}
     key = "smk_" + "b" * 39
+    build.write_config(output)
+    output.write_text(json.dumps({"ingest_key": key}), encoding="utf-8")
     with_key = subprocess.run([shutil.which("python3") or "python", str(ROOT / "scripts/generate_supermetry_config.py"), "--output", str(output)], env={**env, "SUPERMETRY_APP_ID": "fixtureapp123", "SUPERMETRY_INGEST_KEY": key}, capture_output=True, text=True, check=True)
     assert not with_key.stdout and not with_key.stderr
-    assert json.loads(output.read_text(encoding="utf-8"))["ingest_key"] == key
-    build.write_config(output, {})
     assert json.loads(output.read_text(encoding="utf-8")) == {"diagnostics": {"sessionPings": False}}
     if os.name != "nt":
         assert output.stat().st_mode & 0o777 == 0o600
@@ -78,34 +62,7 @@ def test_generated_config_is_git_ignored_and_excluded_from_web_and_preload_defin
     assert "__SUPERMETRY_APP_CONFIG__" in source.split("main: {", 1)[1].split("preload: {", 1)[0]
 
 
-def test_release_artifact_jobs_receive_only_build_time_intake_credentials():
-    import yaml
-    jobs = {"electron-release.yml": ["package"], "electron-build.yml": ["package"],
-        "mobile-release.yml": ["android", "ios"], "ios-testflight.yml": ["testflight"],
-        "android-play-internal.yml": ["play-internal"], "mac-app-store.yml": ["package"],
-        "microsoft-store.yml": ["package"], "snap-store.yml": ["package"]}
-    for filename, names in jobs.items():
-        workflow = yaml.safe_load((ROOT / ".github/workflows" / filename).read_text(encoding="utf-8"))
-        for name in names:
-            job = workflow["jobs"][name]
-            assert not any(key.startswith("SUPERMETRY_") for key in job.get("env", {}))
-            configured = [step for step in job["steps"] if "SUPERMETRY_APP_ID" in step.get("env", {})]
-            assert configured, (filename, name)
-            for step in configured:
-                env = step["env"]
-                assert env["SUPERMETRY_APP_ID"] == "${{ secrets.SUPERMETRY_APP_ID }}"
-                assert env["SUPERMETRY_INGEST_KEY"] == "${{ secrets.SUPERMETRY_INGEST_KEY }}"
-                assert env["SUPERMETRY_APP_HOST"] == "${{ vars.SUPERMETRY_APP_HOST || secrets.SUPERMETRY_APP_HOST }}"
-                assert "SUPERMETRY_DIAGNOSTICS_SESSION_PINGS" not in env
-                assert "bun run check:electron" not in step.get("run", "")
-                assert not any(command in step.get("run", "") for command in ("bun run test", "vp test", "pytest", "testDebugUnitTest"))
-
-
-def test_no_workflow_reads_app_credentials_from_public_repository_variables():
+def test_workflows_never_supply_external_reporting_configuration():
     for workflow in (ROOT / ".github/workflows").glob("*.yml"):
         source = workflow.read_text(encoding="utf-8")
-        for credential in ("SUPERMETRY_APP_ID", "SUPERMETRY_INGEST_KEY"):
-            assert not re.search(
-                rf"\bvars\s*(?:\.\s*{credential}\b|\[\s*['\"]{credential}['\"]\s*\])",
-                source,
-            ), (workflow.name, credential)
+        assert "SUPERMETRY_" not in source, workflow.name

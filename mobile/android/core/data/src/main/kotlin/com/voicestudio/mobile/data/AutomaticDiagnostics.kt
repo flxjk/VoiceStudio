@@ -139,44 +139,22 @@ object AutomaticDiagnostics {
     @Volatile private var hardKillCleanupJob:kotlinx.coroutines.Job?=null
     val observationRevision: Long get() = choices.get()
 
-    @Synchronized fun initialize(app: Application, version: String) {
+    @Synchronized fun initialize(app: Application) {
         if (initialized) return
         initialized = true
         application = app
+        declinedThisRun = true
         scope.launch {
-            try {
-                if (listOf("OMNIVOICE_DIAGNOSTICS_DISABLED", "OMNIVOICE_ANALYTICS_DISABLED").any {
-                    System.getenv(it)?.trim()?.lowercase(java.util.Locale.ROOT) in setOf("1", "true", "yes", "on")
-                }) {
-                    requestedConsent = false
-                    val saved = DiagnosticReports.revokeStoredConsent(File(app.noBackupFilesDir, "diagnostics"))
-                    if(Build.VERSION.SDK_INT >= 30) runCatching {app.getSystemService(ActivityManager::class.java).setProcessStateSummary(null)}
-                    mutable.value = AutomaticDiagnosticState(ready = true,
-                        status = DiagnosticStatus(available = false, consentSaveFailed = !saved), saveFailed = !saved)
-                    if(!saved)scheduleHardKillCleanup(app,choices.get())
-                    return@launch
-                }
-                val owner = AutomaticDiagnosticInitialization(scope, create = {
-                    fun asset(name: String) = app.assets.open(name).bufferedReader(Charsets.UTF_8).use { it.readText() }
-                    val config = Json.parseToJsonElement(asset("diagnostics-destination.json")).jsonObject
-                    val appConfig = DiagnosticAppConfiguration.resolve(runCatching { asset("supermetry-app.generated.json") }.getOrNull(), System.getenv(), config.getValue("host").jsonPrimitive.content)
-                    val destination = DiagnosticDestination(System.getenv("SUPERMETRY_SITE_ID") ?: config.getValue("site").jsonPrimitive.content,
-                        System.getenv("SUPERMETRY_HOST") ?: config.getValue("host").jsonPrimitive.content,
-                        System.getenv("SUPERMETRY_APP_URL") ?: config.getValue("appUrl").jsonPrimitive.content, app = appConfig)
-                    DiagnosticReports(File(app.noBackupFilesDir, "diagnostics"),
-                        DiagnosticPolicy(asset("diagnostics.json")), destination, version,
-                        arch = when (Build.SUPPORTED_ABIS.firstOrNull()) { "arm64-v8a" -> "arm64"; "x86_64" -> "x64"; else -> "unknown" })
-                }, retain = { reporter = it;hardKillCleanupJob?.cancel();hardKillCleanupJob=null }, onLoaded = { reports ->
-                    recoverExits(app, reports)
-                    publishProcessConsent(app, reports)
-                    if(reports.status.consentSaveFailed) requestedConsent = false
-                }, publish = { mutable.value = it }, revision = choices::get, requested = { requestedConsent })
-                initialization = owner
-                owner.start()
-            } catch (_: Exception) {
-                // Missing resources or unavailable storage never prevent offline use.
-                mutable.value = AutomaticDiagnosticState(ready = true, status = DiagnosticStatus(available = false))
+            val saved = DiagnosticReports.revokeStoredConsent(File(app.noBackupFilesDir, "diagnostics"))
+            if (Build.VERSION.SDK_INT >= 30) {
+                runCatching { app.getSystemService(ActivityManager::class.java).setProcessStateSummary(null) }
             }
+            mutable.value = AutomaticDiagnosticState(
+                ready = true,
+                status = DiagnosticStatus(available = false, consentSaveFailed = !saved),
+                saveFailed = !saved,
+            )
+            if (!saved) scheduleHardKillCleanup(app, choices.get())
         }
     }
 

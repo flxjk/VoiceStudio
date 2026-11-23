@@ -1,33 +1,4 @@
-"""Opt-in product analytics — hardened.
-
-VoiceStudio is local-first, so analytics here is held to a higher bar than the
-usual SDK drop-in. Three rules, each enforced in code below and pinned by tests:
-
-1. **Off unless the user says yes.** Two independent gates must BOTH be true:
-   a configured Supermetry site (``config/analytics.json``, overridden by
-   ``SUPERMETRY_SITE_ID`` when set) *and*
-   the user's explicit ``analytics_enabled`` preference, which defaults to
-   **False**. A default install transmits nothing, so the product's promise
-   holds out of the box. ``OMNIVOICE_ANALYTICS_DISABLED=1`` is a hard kill
-   switch that outranks both.
-
-2. **No exception autocapture, ever.** The obvious SDK default
-   (autocapturing exceptions) ships raw tracebacks — which carry
-   absolute paths (``/Users/<name>/…``), and in this codebase can carry Hugging
-   Face tokens and model paths straight out of exception messages. That would
-   bypass ``core.failure.sanitize()``, the redaction this project already runs on
-   every error surface. It is explicitly disabled.
-
-3. **Metadata only, enforced by allowlist.** Every event property is filtered
-   through ``_ALLOWED_PROPS``. A key that isn't on the list is *dropped*, not
-   trusted — so no future caller can leak the text of a take, a file path, or a
-   voice name by adding a field. Counts, durations, ids of *engines* (not users),
-   and booleans are all that can get through.
-
-The person id is a random UUID minted per installation. It is not derived from
-hardware, hostname, username, or anything else identifying — it exists only to
-tell "same install" from "different install".
-"""
+"""Compatibility API for analytics with external delivery disabled in this fork."""
 from __future__ import annotations
 
 import atexit
@@ -39,10 +10,9 @@ import re
 import threading
 import tempfile
 import uuid
-from pathlib import Path
 from typing import Any, Optional
 
-from core.analytics_transport import SupermetryTransport, user_agent, valid_url
+from core.analytics_transport import SupermetryTransport, user_agent
 
 logger = logging.getLogger("omnivoice.analytics")
 
@@ -52,7 +22,6 @@ _client_key: Optional[str] = None  # the destination the live client was built f
 _KILL_SWITCH = "OMNIVOICE_ANALYTICS_DISABLED"
 _OFF_VALUES = {"1", "true", "yes", "on"}
 
-_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "analytics.json"
 _client_lock = threading.RLock()
 # Consent changes invalidate prepared background metadata without waiting for
 # its potentially slow file write. Only publication/removal holds this lock.
@@ -67,26 +36,8 @@ def startup_consent_revision() -> int:
 
 
 def _destination() -> dict:
-    """The public Supermetry destination (``config/analytics.json``). It only
-    names a site: nothing is sent without the user's explicit opt-in.
-    ``SUPERMETRY_SITE_ID`` overrides it (a developer's own site, or empty to
-    switch delivery off)."""
-    try:
-        data = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return {}
-        site = os.environ.get("SUPERMETRY_SITE_ID")
-        result = {
-            "site": (data.get("site", "") if site is None else site).strip(),
-            "host": os.environ.get("SUPERMETRY_HOST", data.get("host", "https://app.supermetry.com")).strip().rstrip("/"),
-            "appUrl": str(data.get("appUrl", "")).strip().rstrip("/"),
-        }
-        if (not valid_url(result["host"], origin=True) or not valid_url(result["appUrl"])
-                or not re.fullmatch(r"[a-z0-9]{6,32}", result["site"])):
-            return {}
-        return result
-    except Exception:
-        return {}
+    """Fork builds have no external analytics destination."""
+    return {}
 
 
 #: The ONLY property keys that may leave this machine. Anything else is dropped.
@@ -140,7 +91,7 @@ def user_opted_in() -> bool:
     try:
         from core import prefs
 
-        return bool(prefs.get("analytics_enabled", False))
+        return token_configured() and bool(prefs.get("analytics_enabled", False))
     except Exception:  # noqa: BLE001 — a broken prefs file must not enable tracking
         return False
 
@@ -157,7 +108,8 @@ def set_opted_in(enabled: bool) -> None:
     global _consent_revision
     with _consent_lock:
         _consent_revision += 1
-    prefs.set_("analytics_enabled", bool(enabled))
+    enabled = bool(enabled and token_configured())
+    prefs.set_("analytics_enabled", enabled)
     prefs.set_("analytics_prompted", True)
     with _consent_lock:
         # Also invalidate workers started while the preference write was in

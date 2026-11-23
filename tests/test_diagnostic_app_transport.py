@@ -9,18 +9,13 @@ KEY = 'smk_' + 'a' * 39
 PROFILE = 'install_' + 'a' * 32
 
 
-def test_configured_app_intake_takes_precedence_without_changing_analytics(monkeypatch):
-    reports = importlib.import_module('core.diagnostic_reports')
-    from core import analytics
-    legacy = {'site': 'legacy123', 'host': 'https://legacy.invalid', 'appUrl': 'https://app.invalid'}
-    monkeypatch.setattr(analytics, '_destination', lambda: dict(legacy))
+def test_fork_reporter_ignores_ambient_app_intake_configuration(monkeypatch):
+    from core import diagnostic_reports as reports
+
     monkeypatch.setenv('SUPERMETRY_APP_ID', 'app123')
     monkeypatch.setenv('SUPERMETRY_INGEST_KEY', KEY)
     monkeypatch.setenv('SUPERMETRY_APP_HOST', 'https://collector.invalid')
-    destination = reports._diagnostic_destination()
-    assert destination.get('app_id') == 'app123'
-    assert destination['host'] == 'https://collector.invalid'
-    assert analytics._destination() == legacy
+    assert reports._diagnostic_destination() == {}
 
 
 def test_common_mapping_golden():
@@ -415,7 +410,7 @@ def test_legacy_fallback_retains_exact_request_shape(isolated_app_config, monkey
     reports = importlib.import_module('core.diagnostic_reports')
     legacy = {'site': 'legacy123', 'host': 'https://legacy.invalid', 'appUrl': 'https://desktop.invalid'}
     monkeypatch.setattr(analytics, '_destination', lambda: legacy)
-    assert reports._diagnostic_destination() == legacy
+    assert reports._diagnostic_destination() == {}
     monkeypatch.setattr(analytics_transport.threading.Thread, 'start', lambda _: None)
     requests = []
     class Connection:
@@ -447,10 +442,10 @@ def test_mapping_enforces_server_field_and_utf8_tag_bounds(isolated_app_config):
 
 
 def test_session_flag_does_not_add_legacy_requests(reporter, isolated_app_config, monkeypatch):
-    from core import analytics, analytics_transport
+    from core import diagnostic_reports, analytics_transport
     module = isolated_app_config
     module._GENERATED_CONFIG.write_text(json.dumps({'diagnostics': {'sessionPings': True}}), encoding='utf-8')
-    monkeypatch.setattr(analytics, '_destination', lambda: {'site': 'legacy123', 'host': 'https://legacy.invalid', 'appUrl': 'https://app.invalid'})
+    monkeypatch.setattr(diagnostic_reports, '_diagnostic_destination', lambda: {'site': 'legacy123', 'host': 'https://legacy.invalid', 'appUrl': 'https://app.invalid'})
     calls = []
     class Legacy:
         def __init__(self, *args, **kwargs): pass

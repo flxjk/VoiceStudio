@@ -6,7 +6,7 @@
 > now lives in `electron/src/shared/`. Existing Tauri installs: see the
 > [migration guide](electron-migration.md).
 
-Settings > Privacy exposes the existing invisible-watermark setting, analytics consent, automatic error reports and generation-history retention.
+Settings > Privacy exposes the invisible watermark and generation-history retention controls. This fork disables external product analytics, automatic error reports, and uninstall pings in source and packaged builds. Saved consent and collector environment variables cannot restore delivery.
 
 Diagnostic bundles and prefilled bug reports scrub known credential query
 parameters, including share PINs, API keys and passwords. The backend and
@@ -24,9 +24,7 @@ or infer the native crash's cause. Ordinary reports retain their section order.
 The report still opens for review before submission, with no automatic raw-log
 upload or additional network request.
 
-Watermark controls appear when the backend reports AudioSeal available and affect new audio through the existing marking path. No audio producer bypasses `mark_synthetic`. Analytics consent uses the existing backend opt-in endpoint and remains unchanged until the user explicitly switches it. After consent, the renderer records fixed screen labels and workflow action labels (clone, design, dubbing, transcription); the backend records lifecycle/error events. Privacy-safe pageviews use fixed app paths under `app.voicestudio.sh`, giving aggregate screen counts without sending renderer URLs or dynamic route segments. The renderer never contacts the analytics service itself: it hands allowlisted events to the local backend, which forwards them only while consent is on. Uncaught renderer errors are reduced to a coarse class and stage; no message, stack, credential, home path, text, audio, filename, or user-named content is sent. Raw exception autocapture, DOM autocapture, automatic pageviews, and session recordings remain disabled. Unavailable features do not display inert toggles, and failed saves preserve confirmed state.
-
-The analytics destination is the public Supermetry site id in `config/analytics.json` (host `https://app.supermetry.com`); every build uses it, and `SUPERMETRY_SITE_ID` / `SUPERMETRY_HOST` override it for developers. Nothing is baked in at build time.
+Watermark controls appear when the backend reports AudioSeal available and affect new audio through the existing marking path. No audio producer bypasses `mark_synthetic`.
 
 Optional VoiceStudio Cloud sign-in validates the discovery issuer and binds its
 token and revocation endpoints to that issuer's origin and HTTP(S) protocol.
@@ -35,7 +33,9 @@ Missing endpoints, different hosts or ports, and embedded-origin schemes such as
 explicit local development configuration; redirects remain disabled. Account
 features stay off until enabled, independently of analytics consent.
 
-## Automatic error reports
+## Upstream automatic error report protocol
+
+This section documents the upstream format for compatibility with old profiles. Fork builds leave the delivery transports unavailable.
 
 Automatic reports have their own explicit consent, separate from usage analytics
 and off by default. Existing analytics consent does not enable them. A fresh

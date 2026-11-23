@@ -13,14 +13,12 @@ import pytest
 @pytest.fixture
 def reporter(monkeypatch,tmp_path):
     reports = importlib.import_module("core.diagnostic_reports")
-    from core import prefs,config,analytics,diagnostic_app_transport
+    from core import prefs,config
     monkeypatch.delenv('OMNIVOICE_DIAGNOSTICS_DIR',raising=False)
     monkeypatch.delenv('OMNIVOICE_DIAGNOSTICS_DISABLED',raising=False)
     monkeypatch.delenv('OMNIVOICE_ANALYTICS_DISABLED',raising=False)
     monkeypatch.setattr(prefs,'_PREFS_PATH',str(tmp_path/'prefs.json'))
     monkeypatch.setattr(config,'DATA_DIR',str(tmp_path))
-    monkeypatch.setattr(analytics,'_destination',lambda:{})
-    monkeypatch.setattr(diagnostic_app_transport,'app_destination',lambda:{})
     instance=reports.Reporter()
     instance.schema=reports._schema()
     monkeypatch.setattr(reports,'_reporter',instance)
@@ -33,7 +31,7 @@ def records(reporter):
     return [json.loads(path.read_text(encoding='utf-8')) for path in reporter.directory.glob('*.json')]
 
 
-def test_fixture_cannot_deliver_to_ambient_app_intake_configuration(reporter, monkeypatch):
+def test_fork_cannot_deliver_to_ambient_app_intake_configuration(reporter, monkeypatch):
     transport = importlib.import_module('core.diagnostic_app_transport')
     attempted = []
 
@@ -343,9 +341,9 @@ def test_standalone_consent_routes_are_available_before_opt_in_and_after_withdra
     from fastapi.testclient import TestClient
     from api.routers.settings import router
     from api.dependencies import require_admin,require_admin_action
-    from core import analytics,analytics_transport,prefs
+    from core import diagnostic_reports,analytics_transport,prefs
 
-    monkeypatch.setattr(analytics,'_destination',lambda:{
+    monkeypatch.setattr(diagnostic_reports,'_diagnostic_destination',lambda:{
         'site':'localtest123','host':'https://collector.invalid','appUrl':'https://app.invalid',
     })
     def no_transport(*args,**kwargs):
@@ -379,9 +377,9 @@ def test_standalone_consent_routes_are_available_before_opt_in_and_after_withdra
 
 @pytest.mark.parametrize('kill',[None,'OMNIVOICE_DIAGNOSTICS_DISABLED','OMNIVOICE_ANALYTICS_DISABLED'])
 def test_standalone_availability_still_requires_destination_and_no_hard_kill(reporter,monkeypatch,kill):
-    from core import analytics
+    from core import diagnostic_reports
     assert reporter.status()['available'] is False  # No destination in this fixture.
-    monkeypatch.setattr(analytics,'_destination',lambda:{'site':'localtest123','host':'https://collector.example','appUrl':'https://app.example'})
+    monkeypatch.setattr(diagnostic_reports,'_diagnostic_destination',lambda:{'site':'localtest123','host':'https://collector.example','appUrl':'https://app.example'})
     if kill:
         monkeypatch.setenv(kill,'1')
         assert reporter.status()['available'] is False
@@ -561,12 +559,12 @@ def test_real_preload_failure_is_reported_not_silent(reporter,monkeypatch):
 
 
 def test_stale_transport_callback_cannot_fill_new_epoch_ack_queue(reporter,monkeypatch):
-    from core import analytics,analytics_transport
+    from core import diagnostic_reports,analytics_transport
     callbacks=[]
     class Transport:
         def __init__(self,destination,should_send,*,on_result):callbacks.append(on_result)
         def shutdown(self):pass
-    monkeypatch.setattr(analytics,'_destination',lambda:{'site':'testdestination','host':'https://collector.example','appUrl':'https://app.example'})
+    monkeypatch.setattr(diagnostic_reports,'_diagnostic_destination',lambda:{'site':'testdestination','host':'https://collector.example','appUrl':'https://app.example'})
     monkeypatch.setattr(analytics_transport,'SupermetryTransport',Transport)
     reporter.consent(True);reporter._tick();old_callback=callbacks[-1]
     reporter.consent(False);reporter.consent(True);reporter._tick()

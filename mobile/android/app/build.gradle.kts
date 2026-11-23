@@ -1,5 +1,4 @@
 import groovy.json.JsonSlurper
-import java.net.URI
 import java.security.MessageDigest
 plugins {
     alias(libs.plugins.android.app)
@@ -7,27 +6,8 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 val repository = rootDir.resolve("../..")
-// Generated resources are rebuilt when intake configuration changes. Only a
-// digest participates in Gradle's input diagnostics; never print a write key.
-val supermetryAppConfig = linkedMapOf<String, Any>("diagnostics" to mapOf(
-    "sessionPings" to (providers.environmentVariable("SUPERMETRY_DIAGNOSTICS_SESSION_PINGS").orNull == "1")
-))
-for ((variable, field, pattern) in listOf(
-    Triple("SUPERMETRY_APP_ID", "app_id", "[a-z0-9]{6,32}"),
-    Triple("SUPERMETRY_INGEST_KEY", "ingest_key", "smk_[a-z2-7]{39}")
-)) {
-    val value = providers.environmentVariable(variable).orNull.orEmpty().trim()
-    if (Regex(pattern).matches(value)) supermetryAppConfig[field] = value
-}
-val supermetryHost = providers.environmentVariable("SUPERMETRY_APP_HOST").orNull.orEmpty().trim().trimEnd('/')
-runCatching {
-    val url = URI(supermetryHost)
-    val secure = url.scheme == "https" || (url.scheme == "http" && url.host?.lowercase() in listOf("localhost", "127.0.0.1", "[::1]"))
-    if (secure && !url.host.isNullOrEmpty() && url.rawUserInfo == null && url.rawQuery == null &&
-        url.rawFragment == null && url.path.orEmpty().isEmpty() && url.port in -1..65535 && supermetryHost.toByteArray().size <= 1988 &&
-        !Regex("[\\x00-\\x20]").containsMatchIn(supermetryHost)) supermetryAppConfig["host"] = supermetryHost
-}
-val supermetryAppJson = groovy.json.JsonOutput.toJson(supermetryAppConfig)
+// Keep the packaged resource credential-free regardless of the build environment.
+val supermetryAppJson = groovy.json.JsonOutput.toJson(mapOf("diagnostics" to mapOf("sessionPings" to false)))
 val supermetryAppDigest = MessageDigest.getInstance("SHA-256")
     .digest(supermetryAppJson.toByteArray()).joinToString("") { "%02x".format(it) }
 val appVersion = (JsonSlurper().parse(repository.resolve("package.json")) as Map<*, *>)["version"].toString()

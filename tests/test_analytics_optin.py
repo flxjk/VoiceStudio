@@ -22,6 +22,8 @@ import pytest
 from core import analytics
 
 
+_fork_destination = analytics._destination
+
 SENT: list[dict] = []
 
 
@@ -48,8 +50,9 @@ def _isolate(monkeypatch, tmp_path):
 
     monkeypatch.setattr(prefs, "_PREFS_PATH", str(tmp_path / "prefs.json"))
     monkeypatch.setattr(config, "DATA_DIR", str(tmp_path))
-    monkeypatch.delenv("SUPERMETRY_SITE_ID", raising=False)
-    monkeypatch.delenv("SUPERMETRY_HOST", raising=False)
+    monkeypatch.setattr(analytics, "_destination", lambda: {
+        "site": "fixture123", "host": "https://app.supermetry.com", "appUrl": "https://fixture.invalid"
+    })
     monkeypatch.delenv("OMNIVOICE_ANALYTICS_DISABLED", raising=False)
     monkeypatch.delenv("OMNIVOICE_INSTALL_CHANNEL", raising=False)
     monkeypatch.delenv("OMNIVOICE_SERVER_MODE", raising=False)
@@ -61,7 +64,7 @@ def _isolate(monkeypatch, tmp_path):
     analytics.shutdown()
 
 
-# ── Rule 1: off unless the user says yes ────────────────────────────────────
+# ── Consent behavior with an injected transport ────────────────────────────────────
 
 
 def test_off_by_default_even_when_the_build_ships_a_destination(monkeypatch):
@@ -70,31 +73,23 @@ def test_off_by_default_even_when_the_build_ships_a_destination(monkeypatch):
     assert analytics.enabled() is False
 
 
-def test_source_builds_have_a_destination_via_the_in_repo_default(monkeypatch):
-    """With no override, the committed public site id is the destination, so
-    source builds get the SAME consent flow as installers. Consent is still the
-    gate: available ≠ enabled."""
-    assert analytics.token_configured() is True  # no override set by _isolate
-    assert analytics.enabled() is False          # …but silence is still not consent
-    analytics.set_opted_in(True)
-    assert analytics.enabled() is True
+def test_fork_ignores_legacy_consent_and_collector_environment(monkeypatch):
+    from core import prefs
 
+    monkeypatch.setattr(analytics, "_destination", _fork_destination)
+    monkeypatch.setenv("SUPERMETRY_SITE_ID", "fixture123")
+    monkeypatch.setenv("SUPERMETRY_HOST", "https://fixture.invalid")
+    monkeypatch.setenv("OMNIVOICE_ANALYTICS_DISABLED", "0")
+    prefs.set_("analytics_enabled", True)
 
-def test_the_env_site_beats_the_shared_config(monkeypatch):
-    """A developer's own site overrides the committed one."""
-    assert analytics._destination()["site"] == "oxxxnwyfwhx4"
-    monkeypatch.setenv("SUPERMETRY_SITE_ID", "devsite12345")
-    assert analytics._destination()["site"] == "devsite12345"
-
-
-def test_opting_in_without_any_token_still_cannot_transmit(monkeypatch):
-    """A build with no destination (the site blanked) — the toggle must not
-    pretend otherwise."""
-    monkeypatch.setenv("SUPERMETRY_SITE_ID", "")
-    analytics.set_opted_in(True)
-    assert analytics.user_opted_in() is True
     assert analytics.token_configured() is False
-    assert analytics.enabled() is False
+    assert analytics.user_opted_in() is False
+    analytics.set_opted_in(True)
+    analytics.record_startup_lifecycle(None)
+    assert not analytics.capture_from_ui("pageview", screen="home")
+    assert SENT == []
+    assert not prefs.get("analytics_enabled")
+    assert analytics.uptime_bucket(20)
 
 
 def test_enabled_only_when_BOTH_gates_are_true(monkeypatch):

@@ -24,14 +24,12 @@ import asyncio, os, time
 from pathlib import Path
 import main
 from core import analytics
-original = analytics._CONFIG_PATH
-class BlockedConfig:
-    def read_text(self, **kwargs):
-        Path(os.environ["ANALYTICS_ENTERED"]).touch()
-        while not Path(os.environ["ANALYTICS_RELEASE"]).exists():
-            time.sleep(0.01)
-        return original.read_text(**kwargs)
-analytics._CONFIG_PATH = BlockedConfig()
+def blocked_destination():
+    Path(os.environ["ANALYTICS_ENTERED"]).touch()
+    while not Path(os.environ["ANALYTICS_RELEASE"]).exists():
+        time.sleep(0.01)
+    return {}
+analytics._destination = blocked_destination
 # Isolate the readiness boundary from unrelated model/runtime work.
 main._EAGER = False
 main._phase_a_build = main._phase_a_finished.set

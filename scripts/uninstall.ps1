@@ -184,52 +184,6 @@ if (-not $Yes) {
   exit 0
 }
 
-# ── Opt-in uninstall ping (before anything is deleted) ──────────────────────
-# Sent only when the user opted in: the backend writes analytics_info.json
-# while analytics is enabled and deletes it on opt-out, and prefs.json must
-# agree. Content-free; redirects and malformed state are refused. Never blocks
-# the uninstall. Not opted in => nothing is sent and nothing is printed.
-try {
-  $infoPath  = Join-Path $dataDir 'analytics_info.json'
-  $disabled = "$env:OMNIVOICE_ANALYTICS_DISABLED".Trim().ToLowerInvariant() -in @('1', 'true', 'yes', 'on')
-  $emptySite = (Test-Path Env:SUPERMETRY_SITE_ID) -and -not "$env:SUPERMETRY_SITE_ID".Trim()
-  $prefsPath = Join-Path $dataDir 'prefs.json'
-  if (-not $disabled -and -not $emptySite -and (Test-Path -LiteralPath $infoPath) -and (Test-Path -LiteralPath $prefsPath) -and ((Get-Content -LiteralPath $prefsPath -Raw | ConvertFrom-Json).analytics_enabled -eq $true)) {
-      $info = Get-Content -LiteralPath $infoPath -Raw | ConvertFrom-Json
-      $hostUri = [Uri]$info.host
-      $appUri = [Uri]$info.appUrl
-      $validUris = $true
-      foreach ($uri in @($hostUri, $appUri)) {
-        if (-not $uri.IsAbsoluteUri -or $uri.Scheme -notin @('http', 'https') -or
-            -not $uri.Host -or $uri.UserInfo -or $uri.Query -or $uri.Fragment) { $validUris = $false }
-      }
-      if ($validUris -and $hostUri.AbsolutePath -eq '/' -and $info.site -and
-          $info.policy -eq 'opt-in' -and $info.profile_id -match '^install_[a-f0-9]{32}$' -and
-          $info.user_agent.StartsWith('Mozilla/5.0 (') -and $info.user_agent -notmatch '[\r\n]') {
-        Write-Host 'Sending anonymous uninstall ping (you opted in to analytics).'
-        $props = @{}
-        foreach ($key in @('app_version', 'platform')) {
-          if ($info.$key -is [string] -and $info.$key.Length -le 64) { $props[$key] = $info.$key }
-        }
-        $body = @{
-          v = 1
-          id = [Guid]::NewGuid().ToString('N')
-          ts = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-          site = $info.site
-          profile_id = $info.profile_id
-          name = 'app_uninstalled'
-          url = "$($info.appUrl.TrimEnd('/'))/uninstall"
-          props = $props
-        } | ConvertTo-Json -Compress
-        Invoke-RestMethod -Method Post -Uri "$($info.host.TrimEnd('/'))/api/public/v1/events" `
-          -ContentType 'application/json' -Body $body -TimeoutSec 2 -MaximumRedirection 0 `
-          -UserAgent $info.user_agent -Headers @{ Origin = $appUri.GetLeftPart([UriPartial]::Authority) } | Out-Null
-      }
-  }
-} catch {
-  # Best-effort by design: a dead network must never block the uninstall.
-}
-
 $deleted = 0
 foreach ($t in $appTargets) {
   if ($t -like 'MSI product:*' -or $t -like 'App: *') { continue }

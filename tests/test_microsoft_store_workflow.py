@@ -22,9 +22,6 @@ def test_store_workflow_is_manual_signed_and_distribution_scoped():
     assert set(build["env"]) == {
         "CSC_LINK",
         "CSC_KEY_PASSWORD",
-        "SUPERMETRY_APP_ID",
-        "SUPERMETRY_INGEST_KEY",
-        "SUPERMETRY_APP_HOST",
     }
     assert "secrets.ELECTRON_WINDOWS_CSC_LINK" in build["env"]["CSC_LINK"]
     assert "electron-builder" in build["run"]

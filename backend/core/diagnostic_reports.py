@@ -24,7 +24,6 @@ import threading
 import time
 from types import ModuleType
 import uuid
-from urllib.parse import urlsplit
 
 _ROOT = Path(__file__).resolve().parents[2]
 _CONFIG = _ROOT / 'config' / 'diagnostics.json'
@@ -135,24 +134,8 @@ def _app_version(value):
 
 
 def _diagnostic_destination():
-    """Diagnostic transport requires TLS, except exact loopback development URLs."""
-    from core.diagnostic_app_transport import app_destination
-    app = app_destination()
-    if app:
-        return app
-    from core.analytics import _destination
-    from core.analytics_transport import valid_url
-    destination = _destination()
-    if not isinstance(destination, dict) or not isinstance(destination.get('site'), str) or not re.fullmatch(r'[a-z0-9]{6,32}', destination['site']):
-        return {}
-    for key in ('host', 'appUrl'):
-        value = destination.get(key)
-        if not valid_url(value, origin=key == 'host'):
-            return {}
-        parsed = urlsplit(value)
-        if parsed.scheme != 'https' and parsed.hostname not in {'localhost', '127.0.0.1', '::1'}:
-            return {}
-    return destination
+    """The backend has no external diagnostic collector in this fork."""
+    return {}
 
 
 def _schema():

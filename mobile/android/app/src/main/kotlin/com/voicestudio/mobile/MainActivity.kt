@@ -51,7 +51,7 @@ import java.util.Locale
 class VoiceStudioApplication:Application() {
     override fun onCreate() {
         super.onCreate()
-        AutomaticDiagnostics.initialize(this, BuildConfig.VERSION_NAME)
+        AutomaticDiagnostics.initialize(this)
     }
 }
 class MainActivity:ComponentActivity() {

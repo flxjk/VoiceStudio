@@ -1,12 +1,4 @@
-"""No analytics key is committed.
-
-The analytics destination is a public Supermetry site id in
-``config/analytics.json``; it only names where opted-in events go. Anything
-that grants access (a Supermetry dashboard/API key ``pnl_...``, a PostHog
-project or personal key) must never be committed, and the clients take no
-token from the product-analytics build environment. Diagnostics-only app intake
-uses a write-only key supplied at build time; that key is never committed.
-"""
+"""Fork releases bundle neither analytics credentials nor a collector."""
 from __future__ import annotations
 
 import json
@@ -50,9 +42,6 @@ def test_ingest_key_detection_covers_native_and_desktop_keys():
     assert not _INGEST_RE.search("smk_" + "0" * 39)
 
 
-def test_the_destination_is_a_public_site_id_only():
+def test_no_analytics_destination_is_bundled():
     config = json.loads((_REPO / "config/analytics.json").read_text(encoding="utf-8"))
-    assert set(config) == {"site", "host", "appUrl"}
-    assert re.fullmatch(r"[a-z0-9]{6,32}", config["site"])
-    assert config["host"] == "https://app.supermetry.com"
-    assert config["appUrl"].startswith("https://")
+    assert config == {"site": "", "host": "", "appUrl": ""}

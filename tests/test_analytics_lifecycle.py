@@ -37,7 +37,9 @@ def sent(monkeypatch, tmp_path):
 
     monkeypatch.setattr(prefs, "_PREFS_PATH", str(tmp_path / "prefs.json"))
     monkeypatch.setattr(config, "DATA_DIR", str(tmp_path))
-    monkeypatch.delenv("SUPERMETRY_SITE_ID", raising=False)
+    monkeypatch.setattr(analytics, "_destination", lambda: {
+        "site": "fixture123", "host": "https://app.supermetry.com", "appUrl": "https://fixture.invalid"
+    })
     monkeypatch.delenv("OMNIVOICE_ANALYTICS_DISABLED", raising=False)
     monkeypatch.delenv("OMNIVOICE_INSTALL_CHANNEL", raising=False)
     monkeypatch.delenv("OMNIVOICE_SERVER_MODE", raising=False)
@@ -187,7 +189,7 @@ def test_installed_never_fires_without_consent_but_is_not_swallowed(sent, monkey
 
 def test_installed_never_fires_without_any_token(sent, monkeypatch):
     # No destination at all: env absent AND the in-repo default (#1193) blanked.
-    monkeypatch.setenv("SUPERMETRY_SITE_ID", "")
+    monkeypatch.setattr(analytics, "_destination", lambda: {})
     analytics.set_opted_in(True)  # consent but no destination
     analytics.record_startup_lifecycle(None)
     assert sent == []
@@ -403,7 +405,7 @@ def test_uninstall_ping_info_written_when_enabled_and_removed_when_not(
     analytics.set_opted_in(True)
     assert info.exists()
     payload = json.loads(info.read_text(encoding="utf-8"))
-    assert payload["site"] == "oxxxnwyfwhx4"
+    assert payload["site"] == analytics._destination()["site"]
     assert payload["host"] == "https://app.supermetry.com"
     assert payload["profile_id"] == analytics.profile_id()
     assert payload["app_version"] == analytics._app_version()
@@ -426,6 +428,6 @@ def test_uninstall_ping_info_written_for_a_source_build_with_the_shared_site(
 
 
 def test_uninstall_ping_info_never_written_without_any_site(sent, monkeypatch, tmp_path):
-    monkeypatch.setenv("SUPERMETRY_SITE_ID", "")  # destination-less build
+    monkeypatch.setattr(analytics, "_destination", lambda: {})
     analytics.set_opted_in(True)
     assert not (tmp_path / analytics.UNINSTALL_PING_INFO_BASENAME).exists()
